@@ -23,13 +23,13 @@ The FastAPI service talks to vLLM over the internal Docker network (no external 
 
 - Docker + Docker Compose
 - NVIDIA GPU + NVIDIA Container Toolkit (for vLLM)
-- A Hugging Face token (`HF_TOKEN`) if using gated Meta Llama models (e.g. `meta-llama/*`)
+- A Hugging Face token (`HF_TOKEN`) for the Llama model
 
 ---
 
 ## Quick start
 
-1) Copy env file and set your Hugging Face token:
+1) Copy env file and set your Hugging Face API token (read only):
 
 ```bash
 cp .env.example .env
