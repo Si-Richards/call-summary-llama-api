@@ -2,7 +2,7 @@
 
 A Docker-first project that runs a local **Llama** model using **vLLM** and exposes a small **FastAPI** service to generate **call summaries** from transcripts.
 
-Designed for support/telecom call transcripts: produces concise summaries plus **key points, decisions, action items, risks, and follow-ups**. Handles long transcripts using **chunk + reduce** summarisation.
+Designed for telephone call transcripts: produces concise summaries plus **key points, decisions, action items, risks, and follow-ups**. Handles long transcripts using **chunk + reduce** summarisation.
 
 Tested on **RTX 5090 (Blackwell) 32GB**.
 
@@ -74,7 +74,7 @@ curl -s http://localhost:8000/summarize-call \
   -d '{
     "agent": "Simon",
     "customer": "John",
-    "call_reason": "Calls dropping on SIP trunk",
+    "call_reason": "i need help with my account, my login wont work!",
     "style": "detailed",
     "max_tokens": 900,
     "temperature": 0.2,
@@ -113,7 +113,7 @@ The API returns your call summary plus sentiment and a per-chunk sentiment timel
   "sentiment_customer": { "label": "negative", "score": -0.35 },
   "sentiment_agent": { "label": "neutral", "score": 0.10 },
   "sentiment_trend": "improving",
-  "sentiment_drivers": ["Frustration about porting date selection", "Resolution agreed and reassurance given"],
+  "sentiment_drivers": ["Frustration about purchase date selection", "Resolution agreed and reassurance given"],
   "escalation_risk": "low",
 
   "sentiment_timeline": [
@@ -134,7 +134,7 @@ The API returns your call summary plus sentiment and a per-chunk sentiment timel
       "overall": { "label": "neutral", "score": -0.05 },
       "customer": { "label": "negative", "score": -0.40 },
       "agent": { "label": "neutral", "score": 0.00 },
-      "drivers": ["Annoyance about lead times / bank holidays causing rejected port requests"],
+      "drivers": ["Annoyance about lead times / bank holidays causing rejected requests"],
       "escalation_risk": "low"
     }
   ],
@@ -192,32 +192,6 @@ and/or
 - `VLLM_MAX_MODEL_LEN`
 
 Then restart.
-
-### API returns “Upstream LLM error”
-Check vLLM from inside the API container:
-
-```bash
-docker compose exec api sh -lc 'curl -sS http://llm:8000/v1/models | head'
-```
-
-### Not seeing sentiment fields
-1) Ensure you’re calling the correct endpoint: `POST /summarize-call`  
-2) Ensure you rebuilt the API container after updating code:
-
-```bash
-docker compose down
-docker compose up -d --build
-```
-
-3) Confirm the OpenAPI schema contains sentiment fields:
-
-```bash
-curl -s http://localhost:8000/openapi.json | grep -n "sentiment_" | head
-```
-
-If the model ignores sentiment instructions, try lowering `temperature` to `0.0` for more deterministic output.
-
----
 
 ## Notes
 
