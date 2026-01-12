@@ -1,10 +1,10 @@
-# Telephone Call Summary API (Llama via vLLM)
+# Telephone Call Summary and Sentiment API (Llama via vLLM)
 
 A Docker-first project that runs a local **Llama** model using **vLLM** and exposes a small **FastAPI** service to generate **call summaries** from transcripts.
 
 Designed for support/telecom call transcripts: produces concise summaries plus **key points, decisions, action items, risks, and follow-ups**. Handles long transcripts using **chunk + reduce** summarisation.
 
-Tested on 5090 Blackwell 32GB
+Tested on **RTX 5090 (Blackwell) 32GB**.
 
 ---
 
@@ -14,6 +14,11 @@ Tested on 5090 Blackwell 32GB
 - **FastAPI container** exposing:
   - `GET /health`
   - `POST /summarize-call`
+- **API Docs**
+  - `GET /docs`
+- **Sentiment + Sentiment Timeline**
+  - Overall, agent, and customer sentiment
+  - Per-chunk sentiment timeline for trend analysis
 
 The FastAPI service talks to vLLM over the internal Docker network (no external LLM dependency).
 
@@ -23,13 +28,13 @@ The FastAPI service talks to vLLM over the internal Docker network (no external 
 
 - Docker + Docker Compose
 - NVIDIA GPU + NVIDIA Container Toolkit (for vLLM)
-- A Hugging Face token (`HF_TOKEN`) for the Llama model
+- A Hugging Face token (`HF_TOKEN`) for the Llama model (read-only is fine)
 
 ---
 
 ## Quick start
 
-1) Copy env file and set your Hugging Face API token (read only):
+1) Copy env file and set your Hugging Face API token:
 
 ```bash
 cp .env.example .env
@@ -56,7 +61,7 @@ curl -s http://localhost:8000/health
 
 ---
 
-## Generate a call summary
+## Generate a call summary (with sentiment)
 
 ### Endpoint
 `POST /summarize-call`
@@ -64,7 +69,9 @@ curl -s http://localhost:8000/health
 ### Example request
 
 ```bash
-curl -s http://localhost:8000/summarize-call   -H "Content-Type: application/json"   -d '{
+curl -s http://localhost:8000/summarize-call \
+  -H "Content-Type: application/json" \
+  -d '{
     "agent": "Simon",
     "customer": "John",
     "call_reason": "Calls dropping on SIP trunk",
@@ -85,6 +92,12 @@ curl -s http://localhost:8000/summarize-call   -H "Content-Type: application/jso
 - `max_tokens` (int): output budget for the model (default: `700`)
 - `temperature` (float): creativity / determinism (default: `0.2`)
 
+---
+
+## Response fields (summary + sentiment)
+
+The API returns your call summary plus sentiment and a per-chunk sentiment timeline.
+
 ### Example response
 
 ```json
@@ -95,9 +108,47 @@ curl -s http://localhost:8000/summarize-call   -H "Content-Type: application/jso
   "action_items": ["…"],
   "risks": ["…"],
   "follow_ups": ["…"],
+
+  "sentiment_overall": { "label": "neutral", "score": 0.05 },
+  "sentiment_customer": { "label": "negative", "score": -0.35 },
+  "sentiment_agent": { "label": "neutral", "score": 0.10 },
+  "sentiment_trend": "improving",
+  "sentiment_drivers": ["Frustration about porting date selection", "Resolution agreed and reassurance given"],
+  "escalation_risk": "low",
+
+  "sentiment_timeline": [
+    {
+      "index": 0,
+      "start_char": 0,
+      "end_char": 11800,
+      "overall": { "label": "neutral", "score": 0.10 },
+      "customer": { "label": "positive", "score": 0.25 },
+      "agent": { "label": "positive", "score": 0.20 },
+      "drivers": ["Friendly greeting and small talk"],
+      "escalation_risk": "low"
+    },
+    {
+      "index": 1,
+      "start_char": 11801,
+      "end_char": 24050,
+      "overall": { "label": "neutral", "score": -0.05 },
+      "customer": { "label": "negative", "score": -0.40 },
+      "agent": { "label": "neutral", "score": 0.00 },
+      "drivers": ["Annoyance about lead times / bank holidays causing rejected port requests"],
+      "escalation_risk": "low"
+    }
+  ],
+
   "model": "meta-llama/Llama-3.1-8B-Instruct"
 }
 ```
+
+### Sentiment interpretation
+
+- `label`: `positive | neutral | negative`
+- `score`: float range **-1.0 .. +1.0** (more negative = more negative sentiment)
+- `sentiment_trend`: `improving | steady | worsening` (derived from the first vs last timeline point)
+- `escalation_risk`: `low | medium | high`
 
 ---
 
@@ -127,7 +178,7 @@ Edit `.env`:
 - `VLLM_GPU_MEMORY_UTILIZATION` – fraction of total VRAM vLLM can reserve
 - `VLLM_MAX_MODEL_LEN` – context length (lower = less KV cache VRAM use)
 - `MAX_INPUT_CHARS` – max accepted transcript size
-- `CHUNK_CHARS` – chunk size for long transcripts
+- `CHUNK_CHARS` – chunk size for long transcripts (also drives timeline granularity)
 - `REQUEST_TIMEOUT_SECS` – timeout for LLM calls
 
 ---
@@ -149,9 +200,27 @@ Check vLLM from inside the API container:
 docker compose exec api sh -lc 'curl -sS http://llm:8000/v1/models | head'
 ```
 
+### Not seeing sentiment fields
+1) Ensure you’re calling the correct endpoint: `POST /summarize-call`  
+2) Ensure you rebuilt the API container after updating code:
+
+```bash
+docker compose down
+docker compose up -d --build
+```
+
+3) Confirm the OpenAPI schema contains sentiment fields:
+
+```bash
+curl -s http://localhost:8000/openapi.json | grep -n "sentiment_" | head
+```
+
+If the model ignores sentiment instructions, try lowering `temperature` to `0.0` for more deterministic output.
+
 ---
 
 ## Notes
 
-- The API requests JSON output. If the model returns invalid JSON, the API falls back to returning the raw summary string.
+- The API requests JSON output. If the model returns invalid JSON, the API falls back to returning the raw `summary` string.
 - For best results, provide clean transcripts (speaker labels and timestamps help).
+- If your transcript includes IVR/menu prompts as `[SPEAKER_00]`, the API can be configured to ignore them to improve sentiment accuracy.
