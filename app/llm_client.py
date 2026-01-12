@@ -1,8 +1,7 @@
-import os
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -19,7 +18,7 @@ def chunk_text(text: str, max_chars: int) -> List[str]:
     if len(text) <= max_chars:
         return [text]
 
-    # Try to chunk on sentence boundaries / newlines.
+    # Try to chunk on sentence boundaries / blank lines.
     parts = re.split(r"(?<=[\.\!\?])\s+|\n{2,}", text)
     chunks: List[str] = []
     cur = ""
@@ -38,7 +37,7 @@ def chunk_text(text: str, max_chars: int) -> List[str]:
     if cur:
         chunks.append(cur)
 
-    # Fallback: if any chunk is still too big, hard-split
+    # Fallback hard-split if needed
     final: List[str] = []
     for c in chunks:
         if len(c) <= max_chars:
@@ -60,7 +59,6 @@ def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     text = re.sub(r"```(?:json)?\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s*```", "", text)
 
-    # Find first {...} block
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
