@@ -1,8 +1,10 @@
-# Call Summary API (Llama via vLLM)
+# Telephone Call Summary API (Llama via vLLM)
 
 A Docker-first project that runs a local **Llama** model using **vLLM** and exposes a small **FastAPI** service to generate **call summaries** from transcripts.
 
 Designed for support/telecom call transcripts: produces concise summaries plus **key points, decisions, action items, risks, and follow-ups**. Handles long transcripts using **chunk + reduce** summarisation.
+
+Tested on 5090 Blackwell 32GB
 
 ---
 
