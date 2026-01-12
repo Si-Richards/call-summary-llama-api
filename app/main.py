@@ -1,3 +1,5 @@
+# app/main.py
+
 import os
 from typing import Any, Dict, List, Optional
 
@@ -40,7 +42,7 @@ llm = OpenAICompatLLM(LLMConfig(base_url=LLM_BASE_URL, model=LLM_MODEL, timeout_
 
 class CallSummaryRequest(BaseModel):
     transcript: str = Field(..., min_length=1, description="Full call transcript (plain text)")
-    # optional metadata for better summaries
+    # Optional metadata for better summaries
     agent: Optional[str] = Field(None, description="Agent name")
     customer: Optional[str] = Field(None, description="Customer name")
     call_reason: Optional[str] = Field(None, description="What the call is about (if known)")
@@ -66,14 +68,16 @@ def build_messages(req: CallSummaryRequest, text: str) -> List[Dict[str, str]]:
         "bullets": "Return a concise bullet-point summary. Capture decisions and actions.",
     }[req.style]
 
-    meta_bits = []
+    meta_bits: List[str] = []
     if req.agent:
         meta_bits.append(f"Agent: {req.agent}")
     if req.customer:
         meta_bits.append(f"Customer: {req.customer}")
     if req.call_reason:
         meta_bits.append(f"Call reason: {req.call_reason}")
+
     meta = "\n".join(meta_bits).strip()
+    meta_block = f"Metadata:\n{meta}\n" if meta else ""
 
     system = (
         "You are a call summarisation assistant for a telecoms service desk. "
@@ -93,9 +97,7 @@ Return output as JSON with these keys:
 - risks (array of strings)
 - follow_ups (array of strings)
 
-{("Metadata:\n" + meta + "\n") if meta else ""}
-
-TRANSCRIPT:
+{meta_block}TRANSCRIPT:
 {text}
 """.strip()
 
@@ -103,10 +105,14 @@ TRANSCRIPT:
 
 
 def summarize_one_pass(req: CallSummaryRequest, text: str) -> Dict[str, Any]:
-    content = llm.chat(build_messages(req, text), max_tokens=req.max_tokens, temperature=req.temperature)
+    content = llm.chat(
+        build_messages(req, text),
+        max_tokens=req.max_tokens,
+        temperature=req.temperature,
+    )
     data = extract_json_object(content)
     if data is None:
-        # fallback: keep raw text in summary
+        # Fallback: keep raw text in summary
         return {
             "summary": content,
             "key_points": [],
@@ -115,7 +121,8 @@ def summarize_one_pass(req: CallSummaryRequest, text: str) -> Dict[str, Any]:
             "risks": [],
             "follow_ups": [],
         }
-    # normalise keys
+
+    # Normalise keys
     return {
         "summary": clean_text(str(data.get("summary", ""))),
         "key_points": data.get("key_points", []) or [],
@@ -153,22 +160,24 @@ def summarize_call(req: CallSummaryRequest):
         return CallSummaryResponse(**out, model=LLM_MODEL)
 
     # Map: summarise each chunk with smaller budget
-    per_chunk = []
-    per_chunk_req = req.model_copy(update={"max_tokens": min(req.max_tokens, 500), "temperature": req.temperature})
-    for c in chunks:
-        per_chunk.append(summarize_one_pass(per_chunk_req, c))
+    per_chunk_req = req.model_copy(update={"max_tokens": min(req.max_tokens, 500)})
+    per_chunk = [summarize_one_pass(per_chunk_req, c) for c in chunks]
 
     # Reduce: combine chunk summaries into one final summary
     combined = "\n\n".join(
-        f"CHUNK {i+1}:\n{pc.get('summary','')}\n"
-        f"Key points: {pc.get('key_points',[])}\n"
-        f"Decisions: {pc.get('decisions',[])}\n"
-        f"Actions: {pc.get('action_items',[])}\n"
-        f"Risks: {pc.get('risks',[])}\n"
-        f"Follow-ups: {pc.get('follow_ups',[])}"
+        (
+            f"CHUNK {i+1}:\n{pc.get('summary','')}\n"
+            f"Key points: {pc.get('key_points',[])}\n"
+            f"Decisions: {pc.get('decisions',[])}\n"
+            f"Actions: {pc.get('action_items',[])}\n"
+            f"Risks: {pc.get('risks',[])}\n"
+            f"Follow-ups: {pc.get('follow_ups',[])}"
+        )
         for i, pc in enumerate(per_chunk)
     )
 
-    final_req = req.model_copy(update={"call_reason": req.call_reason or "Combine chunk summaries into one coherent call summary."})
+    final_req = req.model_copy(
+        update={"call_reason": req.call_reason or "Combine chunk summaries into one coherent call summary."}
+    )
     out = summarize_one_pass(final_req, combined)
     return CallSummaryResponse(**out, model=LLM_MODEL)
