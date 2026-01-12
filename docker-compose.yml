@@ -9,7 +9,9 @@ services:
       - HF_TOKEN=${HF_TOKEN}
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
-    # NOTE: vllm/vllm-openai image entrypoint already runs `vllm serve`
+
+    # NOTE: vllm/vllm-openai image entrypoint is already "vllm serve"
+    # so command begins with the model name (positional), then flags.
     command:
       - ${LLM_MODEL}
       - --host
@@ -26,12 +28,17 @@ services:
       - ${VLLM_MAX_NUM_SEQS}
       - --max-num-batched-tokens
       - ${VLLM_MAX_BATCHED_TOKENS}
+
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""]
       interval: 15s
       timeout: 5s
       retries: 80
       start_period: 10m
+
+    # Optional: expose vLLM to host for debugging
+    # ports:
+    #   - "8001:8000"
 
   api:
     build: .
