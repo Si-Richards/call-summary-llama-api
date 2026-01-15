@@ -13,52 +13,31 @@ def clean_text(s: str) -> str:
     return s
 
 
-def chunk_text(text: str, max_chars: int) -> List[str]:
-    text = clean_text(text)
-    if len(text) <= max_chars:
-        return [text]
-
-    # Try to chunk on sentence boundaries / blank lines.
-    parts = re.split(r"(?<=[\.\!\?])\s+|\n{2,}", text)
-    chunks: List[str] = []
-    cur = ""
-
-    for p in parts:
-        p = p.strip()
-        if not p:
-            continue
-        if len(cur) + len(p) + 1 <= max_chars:
-            cur = (cur + "\n" + p).strip()
-        else:
-            if cur:
-                chunks.append(cur)
-            cur = p
-
-    if cur:
-        chunks.append(cur)
-
-    # Fallback hard-split if needed
-    final: List[str] = []
-    for c in chunks:
-        if len(c) <= max_chars:
-            final.append(c)
-        else:
-            for i in range(0, len(c), max_chars):
-                final.append(c[i : i + max_chars])
-    return final
-
-
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     """
-    Tries to recover a JSON object even if the model wrapped it in prose or code fences.
+    More forgiving JSON extraction:
+    - Strips code fences
+    - Tries parsing entire text
+    - Falls back to the first {...} block
     """
     if not text:
         return None
 
-    # Remove code fences if present
+    text = text.strip()
+
+    # Strip code fences
     text = re.sub(r"```(?:json)?\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s*```", "", text)
 
+    # Try direct parse
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+
+    # Find first {...} block
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
@@ -66,9 +45,71 @@ def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
 
     candidate = text[start : end + 1]
     try:
-        return json.loads(candidate)
+        obj = json.loads(candidate)
+        return obj if isinstance(obj, dict) else None
     except Exception:
         return None
+
+
+def estimate_tokens_rough(text: str) -> int:
+    """
+    Rough token estimator (fast, no tokenizer dependency).
+    Rule of thumb: ~4 chars/token for English-ish text.
+    Add a small padding.
+    """
+    t = clean_text(text)
+    if not t:
+        return 0
+    return max(1, (len(t) // 4) + 8)
+
+
+def chunk_turns_by_token_budget(
+    turns: List[str],
+    max_input_tokens: int,
+    reserved_tokens: int,
+) -> List[str]:
+    """
+    Chunk by 'turns' (lines) to avoid splitting mid-utterance.
+    Keeps each chunk within: max_input_tokens - reserved_tokens (rough estimate).
+    """
+    budget = max(256, max_input_tokens - max(0, reserved_tokens))
+
+    chunks: List[str] = []
+    cur: List[str] = []
+    cur_tok = 0
+
+    for t in turns:
+        t = t.strip()
+        if not t:
+            continue
+        tt = estimate_tokens_rough(t)
+
+        # If a single turn exceeds budget, hard split it.
+        if tt > budget:
+            if cur:
+                chunks.append("\n".join(cur).strip())
+                cur, cur_tok = [], 0
+
+            # Hard split by chars ~ tokens*4
+            hard_chars = max(256, budget * 4)
+            for i in range(0, len(t), hard_chars):
+                piece = t[i : i + hard_chars].strip()
+                if piece:
+                    chunks.append(piece)
+            continue
+
+        if cur_tok + tt <= budget:
+            cur.append(t)
+            cur_tok += tt
+        else:
+            chunks.append("\n".join(cur).strip())
+            cur = [t]
+            cur_tok = tt
+
+    if cur:
+        chunks.append("\n".join(cur).strip())
+
+    return chunks
 
 
 @dataclass
@@ -91,7 +132,11 @@ class OpenAICompatLLM:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+
         r = self.client.post(url, json=payload)
-        r.raise_for_status()
+
+        if r.status_code >= 400:
+            raise RuntimeError(f"vLLM {r.status_code} error: {r.text}")
+
         data = r.json()
         return clean_text(data["choices"][0]["message"]["content"])
