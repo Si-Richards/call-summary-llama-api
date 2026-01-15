@@ -10,8 +10,7 @@ services:
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
 
-    # NOTE: vllm/vllm-openai image entrypoint is already "vllm serve"
-    # so command begins with the model name (positional), then flags.
+    # vllm/vllm-openai image entrypoint is already "vllm serve"
     command:
       - ${LLM_MODEL}
       - --host
@@ -36,10 +35,6 @@ services:
       retries: 80
       start_period: 10m
 
-    # Optional: expose vLLM to host for debugging
-    # ports:
-    #   - "8001:8000"
-
   api:
     build: .
     image: call-summary-api
@@ -52,7 +47,8 @@ services:
       - LLM_BASE_URL=http://llm:8000/v1
       - LLM_MODEL=${LLM_MODEL}
       - MAX_INPUT_CHARS=${MAX_INPUT_CHARS}
-      - CHUNK_CHARS=${CHUNK_CHARS}
       - REQUEST_TIMEOUT_SECS=${REQUEST_TIMEOUT_SECS}
+      - MODEL_MAX_LEN=${MODEL_MAX_LEN}
+      - CACHE_SIZE=${CACHE_SIZE}
     ports:
       - "8000:8000"
